@@ -645,6 +645,12 @@ DecodedInstruction decode_allegrex(std::uint32_t word) {
         } else if (operation == 4u) {
             d.kind = OpcodeKind::Vhdp;
             d.mnemonic = "vhdp";
+        } else if (operation == 5u) {
+            d.kind = OpcodeKind::Vcrs;
+            d.mnemonic = "vcrs";
+        } else if (operation == 6u) {
+            d.kind = OpcodeKind::Vdet;
+            d.mnemonic = "vdet";
         } else {
             d.kind = OpcodeKind::Vfpu;
             d.mnemonic = "vfpu1";

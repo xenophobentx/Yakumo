@@ -832,6 +832,15 @@ std::string emit_regular(const psprecomp::DecodedInstruction &d, std::uint32_t p
             << "u);\n";
         break;
     }
+    case psprecomp::OpcodeKind::Vcrs:
+    case psprecomp::OpcodeKind::Vdet: {
+        const std::uint32_t destination = d.word & 0x7Fu;
+        const std::uint32_t source = (d.word >> 8u) & 0x7Fu;
+        const std::uint32_t target = (d.word >> 16u) & 0x7Fu;
+        out << "    ctx.execute_vfpu_" << (d.kind == psprecomp::OpcodeKind::Vcrs ? "vcrs" : "vdet") << "("
+            << destination << "u, " << source << "u, " << target << "u);\n";
+        break;
+    }
     case psprecomp::OpcodeKind::VcrossQuat: {
         const std::uint32_t size_code = ((d.word >> 7u) & 1u) | (((d.word >> 15u) & 1u) << 1u);
         const std::uint32_t length = size_code + 1u;

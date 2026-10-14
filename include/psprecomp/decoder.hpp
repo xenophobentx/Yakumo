@@ -144,6 +144,8 @@ enum class OpcodeKind {
     Vscl,
     Vdot,
     Vhdp,
+    Vcrs,
+    Vdet,
     Vcmp,
     Vminmax,
     VfpuCompare3,

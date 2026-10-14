@@ -708,6 +708,33 @@ struct alignas(16) AllegrexContext {
         write_vfpu_vector_with_destination_prefix(result, destination_scalar_register, 1u);
     }
 
+    // VCRS.T: the half cross product, d = (s.y*t.z, s.z*t.x, s.x*t.y); a full
+    // cross product is this minus the same with S and T swapped.
+    void execute_vfpu_vcrs(
+        std::uint32_t destination_register, std::uint32_t source_register, std::uint32_t target_register) noexcept {
+        float source[4]{};
+        float target[4]{};
+        read_vfpu_vector(source, source_register, 3u);
+        read_vfpu_vector(target, target_register, 3u);
+        apply_vfpu_source_prefix(source, 3u, 0u);
+        apply_vfpu_source_prefix(target, 3u, 1u);
+        const float result[3]{source[1] * target[2], source[2] * target[0], source[0] * target[1]};
+        write_vfpu_vector_with_destination_prefix(result, destination_register, 3u);
+    }
+
+    // VDET.P: the 2x2 determinant of the pairs S and T, s.x*t.y - s.y*t.x.
+    void execute_vfpu_vdet(std::uint32_t destination_scalar_register, std::uint32_t source_register,
+        std::uint32_t target_register) noexcept {
+        float source[4]{};
+        float target[4]{};
+        read_vfpu_vector(source, source_register, 2u);
+        read_vfpu_vector(target, target_register, 2u);
+        apply_vfpu_source_prefix(source, 2u, 0u);
+        apply_vfpu_source_prefix(target, 2u, 1u);
+        const float result[1]{source[0] * target[1] - source[1] * target[0]};
+        write_vfpu_vector_with_destination_prefix(result, destination_scalar_register, 1u);
+    }
+
     void execute_vfpu_horizontal(std::uint32_t destination_scalar_register, std::uint32_t source_register,
         std::uint32_t source_length, bool average) noexcept {
         if (source_length == 0u || source_length > 4u) return;
