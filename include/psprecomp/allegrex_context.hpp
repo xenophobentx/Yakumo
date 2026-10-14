@@ -29,6 +29,7 @@ struct alignas(16) AllegrexContext {
     // register views overlap; the final lowering layer will provide S/V/M views.
     std::array<float, 128> vfpu{};
     std::array<std::uint32_t, 16> vfpu_ctrl{};
+    std::uint32_t vfpu_rng_state{0x3F800001u};
 
     [[nodiscard]] PSPRECOMP_CONTEXT_FORCEINLINE std::uint32_t fpr_bits(std::uint32_t index) const noexcept {
         return index < fpr.size() ? std::bit_cast<std::uint32_t>(fpr[index]) : 0u;
@@ -590,6 +591,69 @@ struct alignas(16) AllegrexContext {
         }
 
         write_vfpu_vector_with_destination_prefix(result, destination_register, destination_length);
+    }
+
+    // VI2UC/VI2C/VI2US/VI2S: integers narrowed to bytes or halfwords and
+    // packed, four bytes or two halfwords per output word. The unsigned forms
+    // clamp negative inputs to zero and keep the top 8 or 16 bits below the
+    // sign bit; the signed forms keep the top 8 or 16 bits.
+    void execute_vfpu_vi2x(std::uint32_t destination_register, std::uint32_t source_register,
+        std::uint32_t source_length, std::uint32_t operation) noexcept {
+        if (source_length == 0u || source_length > 4u || operation > 3u) return;
+        float source[4]{};
+        read_vfpu_vector(source, source_register, source_length);
+        apply_vfpu_source_prefix(source, source_length, 0u);
+        std::uint32_t packed[2]{};
+        std::uint32_t destination_length = 1u;
+        for (std::uint32_t lane = 0u; lane < source_length; ++lane) {
+            const auto value = std::bit_cast<std::int32_t>(source[lane]);
+            std::uint32_t narrowed = 0u;
+            switch (operation) {
+            case 0u: // VI2UC
+                narrowed = value < 0 ? 0u : (static_cast<std::uint32_t>(value) >> 23u) & 0xFFu;
+                packed[0] |= narrowed << (lane * 8u);
+                break;
+            case 1u: // VI2C
+                narrowed = (static_cast<std::uint32_t>(value) >> 24u) & 0xFFu;
+                packed[0] |= narrowed << (lane * 8u);
+                break;
+            case 2u: // VI2US
+                narrowed = value < 0 ? 0u : (static_cast<std::uint32_t>(value) >> 15u) & 0xFFFFu;
+                packed[lane / 2u] |= narrowed << ((lane & 1u) * 16u);
+                break;
+            default: // VI2S
+                narrowed = (static_cast<std::uint32_t>(value) >> 16u) & 0xFFFFu;
+                packed[lane / 2u] |= narrowed << ((lane & 1u) * 16u);
+                break;
+            }
+        }
+        if (operation >= 2u) destination_length = source_length >= 4u ? 2u : 1u;
+        const float result[2]{std::bit_cast<float>(packed[0]), std::bit_cast<float>(packed[1])};
+        write_vfpu_vector_with_destination_prefix(result, destination_register, destination_length);
+    }
+
+    // VRNDS seeds the VFPU random generator; VRNDI writes random words and
+    // VRNDF1/VRNDF2 random floats in [1, 2) and [2, 4). The generator is a
+    // xorshift, not the hardware's sequence.
+    void execute_vfpu_vrnd(std::uint32_t destination_register, std::uint32_t source_register,
+        std::uint32_t length, std::uint32_t operation) noexcept {
+        if (length == 0u || length > 4u || operation > 3u) return;
+        if (operation == 0u) {
+            float seed[4]{};
+            read_vfpu_vector(seed, source_register, 1u);
+            vfpu_rng_state = std::bit_cast<std::uint32_t>(seed[0]) | 1u;
+            return;
+        }
+        float result[4]{};
+        for (std::uint32_t lane = 0u; lane < length; ++lane) {
+            vfpu_rng_state ^= vfpu_rng_state << 13u;
+            vfpu_rng_state ^= vfpu_rng_state >> 17u;
+            vfpu_rng_state ^= vfpu_rng_state << 5u;
+            const std::uint32_t bits = vfpu_rng_state;
+            if (operation == 1u) result[lane] = std::bit_cast<float>(bits);
+            else result[lane] = std::bit_cast<float>((operation == 2u ? 0x3F800000u : 0x40000000u) | (bits >> 9u));
+        }
+        write_vfpu_vector_with_destination_prefix(result, destination_register, length);
     }
 
     void execute_vfpu_vx2i(std::uint32_t destination_register, std::uint32_t source_register,

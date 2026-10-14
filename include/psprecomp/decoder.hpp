@@ -130,6 +130,8 @@ enum class OpcodeKind {
     Vf2i,
     Vi2f,
     Vx2i,
+    Vi2x,
+    Vrnd,
     VmidT,
     Vmmov,
     VfpuMatrixInit,

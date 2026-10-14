@@ -27,6 +27,10 @@ public:
     static constexpr std::uint32_t kVramMirrorCount = 4u;
     static constexpr std::uint32_t kVramAddressSpan = kVramSize * kVramMirrorCount;
     static constexpr std::uint32_t kPhysicalBase = 0x08000000u;
+    // The Allegrex's 16 KiB scratchpad RAM. Some games keep temporary vertex
+    // buffers there (Ridge Racer 2's polygon clipper writes to 0x00010000).
+    static constexpr std::uint32_t kScratchpadBase = 0x00010000u;
+    static constexpr std::uint32_t kScratchpadSize = 0x4000u;
 
     explicit GuestMemory(std::uint32_t size_bytes = 32u * 1024u * 1024u);
 
@@ -242,7 +246,7 @@ public:
     [[nodiscard]] const std::vector<std::uint8_t> &vram_bytes() const noexcept;
 
 private:
-    enum class Region { Vram, Ram };
+    enum class Region { Vram, Ram, Scratchpad };
     struct ResolvedAddress {
         Region region;
         std::size_t offset;
@@ -299,6 +303,7 @@ private:
 
     std::vector<std::uint8_t> vram_;
     std::vector<std::uint8_t> bytes_;
+    std::vector<std::uint8_t> scratchpad_;
     // Cached view of bytes_ for the inline fast paths.  Neither region is ever
     // resized after construction, so these stay valid for the object's life.
     //

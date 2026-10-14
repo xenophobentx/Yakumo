@@ -602,6 +602,14 @@ std::string emit_regular(const psprecomp::DecodedInstruction &d, std::uint32_t p
             << "u); }\n";
         break;
     }
+    case psprecomp::OpcodeKind::Vi2x:
+    case psprecomp::OpcodeKind::Vrnd: {
+        const std::uint32_t size_code = ((d.word >> 7u) & 1u) | (((d.word >> 15u) & 1u) << 1u);
+        out << "    ctx.execute_vfpu_" << (d.kind == psprecomp::OpcodeKind::Vi2x ? "vi2x" : "vrnd") << "("
+            << (d.word & 0x7Fu) << "u, " << ((d.word >> 8u) & 0x7Fu) << "u, " << (size_code + 1u) << "u, "
+            << ((d.word >> 16u) & 3u) << "u);\n";
+        break;
+    }
     case psprecomp::OpcodeKind::Vx2i: {
         const std::uint32_t size_code = ((d.word >> 7u) & 1u) | (((d.word >> 15u) & 1u) << 1u);
         const std::uint32_t source_length = size_code + 1u;

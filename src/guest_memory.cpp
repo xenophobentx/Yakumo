@@ -84,7 +84,7 @@ void set_write_watch(std::uint32_t address, std::uint32_t size) {
 }
 
 GuestMemory::GuestMemory(std::uint32_t size_bytes)
-    : vram_(kVramSize, 0u), bytes_(size_bytes, 0u),
+    : vram_(kVramSize, 0u), bytes_(size_bytes, 0u), scratchpad_(kScratchpadSize, 0u),
       write_watch_enabled_(std::getenv("PSPRECOMP_WATCH_WRITE") != nullptr) {
     if (size_bytes != 32u * 1024u * 1024u && size_bytes != 64u * 1024u * 1024u) {
         throw Error("PSP RAM size must be 32 MiB or 64 MiB");
@@ -117,6 +117,7 @@ bool GuestMemory::contains(std::uint32_t address, std::size_t length) const noex
     const std::uint64_t end = static_cast<std::uint64_t>(c) + static_cast<std::uint64_t>(length);
     if (is_vram_window(c) && end <= static_cast<std::uint64_t>(kVramPhysicalBase) + kVramAddressSpan) return true;
     if (c >= kPhysicalBase && end <= static_cast<std::uint64_t>(kPhysicalBase) + bytes_.size()) return true;
+    if (c >= kScratchpadBase && end <= static_cast<std::uint64_t>(kScratchpadBase) + kScratchpadSize) return true;
     return false;
 }
 
@@ -126,14 +127,15 @@ GuestMemory::ResolvedAddress GuestMemory::resolve(std::uint32_t address, std::si
     }
     const std::uint32_t c = canonical(address);
     if (is_vram_window(c)) return {Region::Vram, vram_offset(c)};
+    if (c < kPhysicalBase) return {Region::Scratchpad, static_cast<std::size_t>(c - kScratchpadBase)};
     return {Region::Ram, static_cast<std::size_t>(c - kPhysicalBase)};
 }
 
 const std::vector<std::uint8_t> &GuestMemory::region_bytes(Region region) const noexcept {
-    return region == Region::Vram ? vram_ : bytes_;
+    return region == Region::Vram ? vram_ : (region == Region::Scratchpad ? scratchpad_ : bytes_);
 }
 std::vector<std::uint8_t> &GuestMemory::region_bytes(Region region) noexcept {
-    return region == Region::Vram ? vram_ : bytes_;
+    return region == Region::Vram ? vram_ : (region == Region::Scratchpad ? scratchpad_ : bytes_);
 }
 
 namespace {
@@ -361,7 +363,11 @@ const std::uint8_t *GuestMemory::raw_pointer(std::uint32_t address, std::size_t 
         if (offset + length <= vram_.size()) return vram_.data() + offset;
         return nullptr;
     }
-    if (c < kPhysicalBase) return nullptr;
+    if (c < kPhysicalBase) {
+        if (c >= kScratchpadBase && static_cast<std::size_t>(c - kScratchpadBase) + length <= scratchpad_.size())
+            return scratchpad_.data() + (c - kScratchpadBase);
+        return nullptr;
+    }
     const std::size_t offset = static_cast<std::size_t>(c - kPhysicalBase);
     if (offset + length <= bytes_.size()) return bytes_.data() + offset;
     return nullptr;

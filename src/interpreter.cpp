@@ -620,6 +620,12 @@ bool execute_simple(Runtime &rt, AllegrexContext &ctx, const DecodedInstruction 
     case OpcodeKind::Vh2f:
         ctx.execute_vfpu_vh2f(vfpu_vd(d.word), vfpu_vs(d.word), vfpu_length(d.word));
         break;
+    case OpcodeKind::Vi2x:
+        ctx.execute_vfpu_vi2x(vfpu_vd(d.word), vfpu_vs(d.word), vfpu_length(d.word), (d.word >> 16u) & 3u);
+        break;
+    case OpcodeKind::Vrnd:
+        ctx.execute_vfpu_vrnd(vfpu_vd(d.word), vfpu_vs(d.word), vfpu_length(d.word), (d.word >> 16u) & 3u);
+        break;
     case OpcodeKind::Vx2i:
         ctx.execute_vfpu_vx2i(vfpu_vd(d.word), vfpu_vs(d.word), vfpu_length(d.word), (d.word >> 16u) & 3u);
         break;
@@ -1001,7 +1007,20 @@ void report_interpreter_stats(std::size_t limit) {
     }
 }
 
+InterpreterExit interpret_allegrex_slice(Runtime &rt, AllegrexContext &ctx, std::uint64_t instruction_budget);
+
+// A fault inside interpreted code names the instruction that raised it: the
+// dispatcher only knows where the slice started.
 InterpreterExit interpret_allegrex(Runtime &rt, AllegrexContext &ctx, std::uint64_t instruction_budget) {
+    try {
+        return interpret_allegrex_slice(rt, ctx, instruction_budget);
+    } catch (const Error &error) {
+        throw Error(std::string(error.what()) + " (interpreted instruction at " + hex32(ctx.pc) + ", ra=" +
+            hex32(ctx.gpr[31]) + ")");
+    }
+}
+
+InterpreterExit interpret_allegrex_slice(Runtime &rt, AllegrexContext &ctx, std::uint64_t instruction_budget) {
     load_settings();
     const std::uint64_t budget = instruction_budget != 0u ? instruction_budget : g_budget;
     GuestMemory &memory = rt.memory();
