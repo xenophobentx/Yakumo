@@ -1125,6 +1125,71 @@ static std::vector<std::uint8_t> make_relocation_test_prx() {
     return bytes;
 }
 
+// VFPU forms and memory added for Ridge Racer 2: vcrs.t, vdet.p, the vi2x
+// narrowing family, the vrnd family, and the 16 KiB scratchpad.
+static void test_rr2_vfpu_and_scratchpad() {
+    const auto vcrs = psprecomp::decode_allegrex(0x66818103u);
+    require(vcrs.kind == psprecomp::OpcodeKind::Vcrs && vcrs.mnemonic == "vcrs", "VCRS.T classification failed");
+    const std::uint32_t vdet_word = (0x19u << 26u) | (6u << 23u) | (4u << 16u) | (0u << 8u) | (1u << 7u) | 8u;
+    const auto vdet = psprecomp::decode_allegrex(vdet_word);
+    require(vdet.kind == psprecomp::OpcodeKind::Vdet && vdet.mnemonic == "vdet", "VDET.P classification failed");
+    const auto vi2uc = psprecomp::decode_allegrex(0xD03C8186u);
+    require(vi2uc.kind == psprecomp::OpcodeKind::Vi2x && vi2uc.mnemonic == "vi2uc", "VI2UC.Q classification failed");
+    const auto vrndf1 = psprecomp::decode_allegrex(0xD0228001u);
+    require(vrndf1.kind == psprecomp::OpcodeKind::Vrnd && vrndf1.mnemonic == "vrndf1", "VRNDF1 classification failed");
+
+    psprecomp::AllegrexContext ctx{};
+    ctx.eat_vfpu_prefixes();
+    const float s[3]{1.0f, 2.0f, 3.0f};
+    const float t[3]{4.0f, 5.0f, 6.0f};
+    ctx.write_vfpu_vector(s, 0u, 3u);
+    ctx.write_vfpu_vector(t, 4u, 3u);
+    ctx.execute_vfpu_vcrs(8u, 0u, 4u);
+    float d[4]{};
+    ctx.read_vfpu_vector(d, 8u, 3u);
+    require(d[0] == 12.0f && d[1] == 12.0f && d[2] == 5.0f, "VCRS.T did not compute (s.y*t.z, s.z*t.x, s.x*t.y)");
+
+    ctx.execute_vfpu_vdet(8u, 0u, 4u);
+    require(std::bit_cast<float>(ctx.vfpu_scalar_bits(8u)) == -3.0f, "VDET.P did not compute s.x*t.y - s.y*t.x");
+
+    const std::uint32_t ints[4]{0x7FFFFFFFu, 0x00800000u, static_cast<std::uint32_t>(-5), 0x40000000u};
+    float packed_in[4]{};
+    for (int i = 0; i < 4; ++i) packed_in[i] = std::bit_cast<float>(ints[i]);
+    ctx.write_vfpu_vector(packed_in, 0u, 4u);
+    ctx.execute_vfpu_vi2x(8u, 0u, 4u, 0u);
+    require(ctx.vfpu_scalar_bits(8u) == 0x800001FFu, "VI2UC.Q packing failed");
+    ctx.execute_vfpu_vi2x(8u, 0u, 4u, 1u);
+    require(ctx.vfpu_scalar_bits(8u) == 0x40FF007Fu, "VI2C.Q packing failed");
+    const std::uint32_t halves[2]{0x7FFF0000u, 0x12340000u};
+    const float halves_in[2]{std::bit_cast<float>(halves[0]), std::bit_cast<float>(halves[1])};
+    ctx.write_vfpu_vector(halves_in, 0u, 2u);
+    ctx.execute_vfpu_vi2x(8u, 0u, 2u, 3u);
+    require(ctx.vfpu_scalar_bits(8u) == 0x12347FFFu, "VI2S.P packing failed");
+
+    for (int i = 0; i < 64; ++i) {
+        ctx.execute_vfpu_vrnd(8u, 0u, 1u, 2u);
+        const float one_to_two = std::bit_cast<float>(ctx.vfpu_scalar_bits(8u));
+        require(one_to_two >= 1.0f && one_to_two < 2.0f, "VRNDF1 left [1, 2)");
+        ctx.execute_vfpu_vrnd(8u, 0u, 1u, 3u);
+        const float two_to_four = std::bit_cast<float>(ctx.vfpu_scalar_bits(8u));
+        require(two_to_four >= 2.0f && two_to_four < 4.0f, "VRNDF2 left [2, 4)");
+    }
+
+    psprecomp::GuestMemory memory;
+    require(memory.contains(0x00010000u, 4u) && memory.contains(0x00013FFCu, 4u), "Scratchpad is not mapped");
+    require(!memory.contains(0x00014000u) && !memory.contains(0x0000FFFCu, 4u), "Scratchpad bounds are wrong");
+    memory.store32(0x00010000u, 0xCAFEF00Du);
+    require(memory.load32(0x00010000u) == 0xCAFEF00Du, "Scratchpad store/load failed");
+    require(memory.load32(0x40010000u) == 0xCAFEF00Du, "Scratchpad uncached alias failed");
+    memory.store8(0x00013FFFu, 0x5Au);
+    require(memory.raw_pointer(0x00013FFFu, 1u) != nullptr && *memory.raw_pointer(0x00013FFFu, 1u) == 0x5Au,
+        "Scratchpad raw pointer failed");
+    require(memory.raw_pointer(0x00013FFFu, 2u) == nullptr, "Scratchpad raw pointer ran past its end");
+    psprecomp::GuestMemory::AotFastView view = memory.aot_fast_view();
+    view.aot_store32(0x00010010u, 0x01020304u);
+    require(view.aot_load32(0x00010010u) == 0x01020304u, "Scratchpad AOT slow path failed");
+}
+
 int main() {
     try {
         test_import_return_context_guard();
@@ -1136,6 +1201,7 @@ int main() {
         test_interpreter_floating_point();
         test_interpreter_dispatch_fallback();
         test_interpreter_budget_and_disable();
+        test_rr2_vfpu_and_scratchpad();
 
         psprecomp::GuestMemory mem;
         mem.store32(0x08800000u, 0x12345678u);
